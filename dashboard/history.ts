@@ -404,7 +404,8 @@ function trajectory(h: History): ViewNode {
         muted(
           `${tailNote(shown.length, h.months.length, "month")} Bars are scaled to the busiest ` +
             `month of all time (${n(max)}), so the table and the chart above share one scale. ` +
-            `${n(total)} commits over all ${n(h.months.length)} months, against the ` +
+            `${countOf(total, "commit", "commits")} over all ` +
+            `${countOf(h.months.length, "month", "months")}, against the ` +
             `${n(h.commits)} in the window every other block counts.`,
         ),
       ],
@@ -418,7 +419,9 @@ export function buildHistorySpec(h: History, top: number): ViewSpec {
   return {
     version: 1,
     title: `Repo history — ${h.name}`,
-    description: `${n(h.commits)} commits ${window}, ${countOf(h.authors.length, "author", "authors")}.`,
+    description:
+      `${countOf(h.commits, "commit", "commits")} ${window}, ` +
+      `${countOf(h.authors.length, "author", "authors")}.`,
     themeOverrides: DEEP_OCEAN,
     root: themedPage([
       {
@@ -457,9 +460,13 @@ export function buildHistorySpec(h: History, top: number): ViewSpec {
                     statTile(
                       "Authors",
                       n(h.authors.length),
-                      `${n(h.commits - h.merges)} non-merge commits`,
+                      countOf(h.commits - h.merges, "non-merge commit", "non-merge commits"),
                     ),
-                    statTile("Files touched", n(h.files.length), `${n(h.touches)} file touches`),
+                    statTile(
+                      "Files touched",
+                      n(h.files.length),
+                      countOf(h.touches, "file touch", "file touches"),
+                    ),
                     statTile(
                       "Firefighting",
                       share(h.fires.length, h.commits),

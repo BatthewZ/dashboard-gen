@@ -156,6 +156,12 @@ Match the disclosure to the ordering. "The top 12" names the wrong twelve in a t
 by date; a chronological cut has to say it kept the most recent and how many older rows it
 did not list.
 
+**Route every count through the pluraliser, including the ones in the document's own
+metadata.** Any figure that can be 1 will be 1 on the smallest input, which is the input a
+new user reaches for first — and the sites that get missed are the ones that do not look
+like prose: a tile's caption, a page description, a title. Assert it on a minimal fixture
+rather than by eye, because the singular case is the one nobody renders.
+
 **Filtering membership does not filter the numbers.** A window that admits any item
 overlapping it, and then sums each admitted item whole, produces a page headed with the
 window whose headline is largely work from outside it. Whether to clip is a real design

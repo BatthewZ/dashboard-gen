@@ -6,7 +6,7 @@
  * is the thing under test, and a fixture of canned `git log` output would test nothing but
  * itself.
  */
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { errorsOf, validateViewSpec, warningsOf } from "@batthewz/response-ui-renderer/spec";
@@ -233,6 +233,14 @@ console.log("history CLI: the entry point users actually run");
     bare.stdout.toString().includes("bun run preview history.blob.json"), true);
   check("…on stdout, so a successful run is not painted as an error",
     bare.stderr.toString(), "");
+
+  // A one-commit repo is the first thing anyone renders after `git init`, and it is the
+  // only shape where every count on the page is singular. Two tiles and the trajectory
+  // footnote read "1 commits" until every count goes through `countOf`.
+  const fresh = readFileSync(join(out, "history.blob.json"), "utf8");
+  check("a repo with one commit is not described in the plural",
+    fresh.match(/\b1 (?:[a-z\/-]+ )*(?:commits|months|files|authors|merges|touches|fixes)\b/g),
+    null);
 
   rmSync(join(out, "history.blob.json"));
   const piped = run(["--since", "1970-01-01", "--stdout"]);
