@@ -16,6 +16,12 @@ It runs essentially runs some git commands on a local repo of your choosing, and
 
 `git log --oneline --since="1 year ago" | grep -iE 'revert|hotfix|emergency|rollback'`
 
+Plus three the shell versions cannot compose at all: a commit-grouped
+`git log --format=$'\x1e%H\x1f%aN' --name-only` pass that keeps the commit boundary — which
+is what temporal coupling, per-file ownership and commit shape are counted from — and
+`--date=format:'%u %H'` / `--date=format:'%Y-%m'` passes that bucket every commit by
+author-local weekday × hour and by author per month.
+
 # dashboard-gen
 
 Every repository is already keeping a detailed record of how it was built. You just can't
@@ -40,16 +46,16 @@ nothing to remember.
 wrote:
 
 ```
-/home/you/code/thing · 4166 commit(s) since 1 year ago · 4491 file(s) · 7 author(s) · 125 month(s) of history
+/home/you/code/thing · 4165 commit(s) since 1 year ago · 4491 file(s) · 7 author(s) · 125 month(s) of history
 validateViewSpec  ok=true  errors=0  warnings=0
-registry          21 names used, 175 known, 0 unresolved
+registry          22 names used, 176 known, 0 unresolved
 
-46.2 KB → history.blob.json
+76.7 KB → history.blob.json
 look at it:  bun run preview history.blob.json
 ```
 
-That is a real run over a ten-year, 25,000-commit repository: a few seconds, and 46 KB out,
-because every table is capped and says what it cut.
+That is a real run over a ten-year, 25,000-commit repository: under a second, and 77 KB
+out, because every table is capped and says what it cut.
 
 Then `preview` compiles CSS, bundles the host, and serves:
 
@@ -59,7 +65,7 @@ This page carries verbatim commit messages and is served to localhost only. Ctrl
 ```
 
 Open that URL and you get a dark page headed **Repo history — thing**: four tiles, a
-trajectory card, then four tabs.
+trajectory card, then seven tabs.
 
 That report is on **stdout** — it is progress, not an error, and a terminal that paints
 stderr red would say otherwise. Failures go to stderr: a bad flag, a path that is not a
@@ -81,6 +87,7 @@ bun run preview history.blob.json
 | `not a git repository`                                | `--repo` points outside a repo                | Any path _inside_ the repository works                 |
 | `has no commits yet`                                  | Fresh `git init`                              | Nothing to read until the first commit                 |
 | `No commit falls since …` on the page                 | The window is narrower than the repo is quiet | `bun run history --since "5 years ago"`                |
+| `No commit falls since 1970-…` on a repo with commits | East of UTC, epoch-day midnight parses to a negative timestamp git reads as "after everything" | Any post-epoch date works: `--since 2000-01-01`        |
 | `error: Failed to start server. Is port 8787 in use?` | A preview is already running                  | `bun run preview --port 8788`                          |
 | `no such file: history.blob.json`                     | You ran `preview` before `history`            | Build the document first — the error names the command |
 | A module resolution error naming `@batthewz/…`        | No `node_modules`                             | `bun install`                                          |
@@ -90,13 +97,16 @@ bun run preview history.blob.json
 
 ## What the page answers
 
-| Block                  | Answers                                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Trajectory**         | Commits per month for the whole life of the repo, with a direction called from the last six _complete_ months |
-| **What changes most**  | Files ranked by commits that touched them, each with the share of those commits that were fixes               |
-| **Where bugs cluster** | The same files ranked by fix-flagged commits — messages matching `fix`, `bug` or `broken`                     |
-| **Who built this**     | Non-merge commits per author, by the identity `.mailmap` resolves                                             |
-| **Firefighting**       | Commits whose subject says revert, hotfix, emergency or rollback, and what share of the window they are       |
+| Block                     | Answers                                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trajectory**            | Commits per month for the whole life of the repo, with a direction called from the last six _complete_ months                                                  |
+| **What changes most**     | Files ranked by commits that touched them, each with the share of those commits that were fixes                                                                |
+| **Where bugs cluster**    | The same files ranked by fix-flagged commits — messages matching `fix`, `bug` or `broken`                                                                      |
+| **What changes together** | File pairs that co-change in one commit — counted over commits touching 2–10 files — with confidence against the rarer file, and a co-change matrix of the strongest cluster |
+| **Who built this**        | Non-merge commits per author with their all-history active span, and **contributor flux** — active and first-time authors per year                              |
+| **Who knows what**        | **Knowledge risk** — files where one author holds 70%+ and has gone quiet — and a per-author tracker: each author's files, with their share of the file and the file's share of their work |
+| **How work lands**        | A weekday × hour heatmap of commits in author-local time, weekend and off-hours shares, and commit shape: median files per commit, mega-commits, the biggest commits |
+| **Firefighting**          | Commits whose subject says revert, hotfix, emergency or rollback, and what share of the window they are                                                        |
 
 ### Three things that will mislead you if you skim
 
@@ -112,6 +122,11 @@ bun run preview history.blob.json
 - **The month in progress is excluded from the trend** and labelled in the table. A partial
   month always looks like a collapse, so including it would report a dying project every
   time you ran this on the 3rd.
+- **"At risk" means inactive here, not gone.** Knowledge risk calls an author inactive
+  from their last commit *in this repo*; they may be busy in a sibling repo the page
+  cannot see. Likewise the work-rhythm clock is the author date in the commit's own
+  timezone — a rebase or squash-merge re-stamps it, so it is a proxy for when work
+  happened, not a timesheet. Both blocks say so on the page.
 
 Every tally is counted in-process from the full `git log` output rather than from a
 `head -20`, so each table states its own remainder — what it cut, how many rows, and what
@@ -173,10 +188,10 @@ and says which is which.
 
 Two checks run on every build, both fatal. A failing gate exits 1 and **writes nothing**.
 
-| Gate                                                     | Catches                                                                                                                                                                    |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `validateViewSpec`, **errors and warnings**              | Enum typos, a `Dialog` with no literal `id`, forbidden props, over-deep nesting                                                                                            |
-| Component names vs `listComponentNames(defaultRegistry)` | `validateViewSpec` does not check these — its React-free entry point has no registry — so a misspelled `Crad` validates clean and renders an inline warning box at runtime |
+| Gate                                                    | Catches                                                                                                                                                                     |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validateViewSpec`, **errors and warnings**             | Enum typos, a `Dialog` with no literal `id`, forbidden props, over-deep nesting                                                                                             |
+| Component names vs the **shared registry**              | The registry in [src/registry.ts](src/registry.ts) — the library plus this repo's own `Heatmap` — which the preview host renders with too, so the gate can never approve a name the host cannot draw |
 
 Warnings are fatal on purpose: that tier is where authoring mistakes actually surface, so
 passing on `ok` alone throws most of the tool away. It earned itself on the first run —
@@ -272,11 +287,17 @@ component cannot label or be hovered. Before changing what it counts, read
 [memory/git-history-metrics.md](memory/git-history-metrics.md) — including the git commands
 that report nothing at all when a program rather than a person runs them.
 
-| Path                                         | What it is                                                  |
-| -------------------------------------------- | ----------------------------------------------------------- |
-| [dashboard/history.ts](dashboard/history.ts) | Reads `git log`, builds the document, and is the CLI        |
-| [dashboard/format.ts](dashboard/format.ts)   | Formatting and ViewNode helpers every figure passes through |
-| [dashboard/theme.ts](dashboard/theme.ts)     | The palette, and the node that makes it visible             |
-| [dashboard/gate.ts](dashboard/gate.ts)       | The two checks, and the writer that runs after them         |
-| [preview/](preview/)                         | The smallest host that proves a document paints             |
-| [src/report.ts](src/report.ts)               | Which stream a diagnostic goes to                           |
+| Path                                         | What it is                                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------------------- |
+| [dashboard/history.ts](dashboard/history.ts) | Reads `git log`, builds the document, and is the CLI                              |
+| [dashboard/format.ts](dashboard/format.ts)   | Formatting and ViewNode helpers every figure passes through                       |
+| [dashboard/theme.ts](dashboard/theme.ts)     | The palette, and the node that makes it visible                                   |
+| [dashboard/gate.ts](dashboard/gate.ts)       | The two checks, and the writer that runs after them                               |
+| [src/registry.ts](src/registry.ts)           | The one registry and contracts both the gate and the host consume                 |
+| [src/heatmap.tsx](src/heatmap.tsx)           | The `Heatmap` component — token-painted, so it follows any theme                  |
+| [preview/](preview/)                         | The smallest host that proves a document paints                                   |
+| [src/report.ts](src/report.ts)               | Which stream a diagnostic goes to                                                 |
+
+A document that names `Heatmap` renders only on a host holding the shared registry. That
+is the price of a component the library does not ship, and it is why the registry lives in
+one module: the gate, the tests and the preview all import it, so they cannot disagree.

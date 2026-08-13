@@ -20,6 +20,11 @@ must come from one pass over one population, or they will drift apart.
 - **`--since` filters on committer date; `%ad` prints author date.** A fixture that sets
   only `GIT_AUTHOR_DATE` has no window to test — every commit lands at whenever the suite
   ran. Set both, and know which date each figure is standing on.
+- **`--since=1970-01-01` silently returns nothing east of UTC.** The date is parsed in
+  local time, so on a UTC+N machine midnight of the epoch day lands *before* the epoch;
+  the negative timestamp reads as "after everything" and the log comes back empty with no
+  warning. "Since forever" must be spelled with a safely post-epoch date (`2000-01-01`),
+  in tests and in any documented example alike.
 - **Merge commits emit no filenames** under `--name-only`, so a file-churn tally is
   implicitly non-merge while a commit count is not. Say which population a number is from;
   authors summing to less than the commit total is otherwise read as a bug.
@@ -43,6 +48,37 @@ and they are the ones absent from the data.
 **Exclude the month in progress from any trend.** A partial month always looks like a
 collapse, so a trend that includes it reports a dying project every time it runs early in
 the month.
+
+## Keeping the commit boundary
+
+A flat `--name-only` tally can say how often each file changed and nothing about which
+files changed *together* — the format that emits nothing per commit also emits no
+separator, so the grouping is structurally gone before parsing starts. When an analysis
+needs the commit as a unit (co-change pairs, files-per-commit shape, per-file ownership),
+open each record with an explicit separator byte in the format string and let the file
+list follow; split on the separator, take the first line as the header, and derive every
+per-commit figure from those records so they are one population by construction. Put any
+free-text field (the subject) in a separate flat pass joined by hash, so a hostile subject
+can corrupt only its own field and never the record framing.
+
+Co-change counting needs its population bounded and disclosed: a commit touching one file
+carries no pair, and a bulk edit touching dozens pairs everything with everything and
+means nothing pairwise. Exclude both ends, say so on the page with counts, and read a
+pair's confidence against the rarer file's own count over that same bounded population —
+mixing in the file's all-commits churn count makes the percentage a lie.
+
+## Which clock a date is on
+
+`--date=format:` renders `%ad` in the timezone recorded on each commit — the author's own
+clock — while `format-local:` silently converts to the machine's. For "when does work
+happen" the commit's own clock is the honest axis, and it is still a proxy: rebases and
+squash-merges re-stamp it. `%u` is ISO weekday, Monday first. Cross joins need the same
+care as windows: judging an author inactive takes their last commit over *all* history,
+while their commit count is windowed — two scales in one row, so the prose must name
+which is which, and "inactive in this repo" must not be presented as "gone".
+
+A year series inherits every month-series rule: fill silent years with zero, run to the
+current year, and label the year in progress.
 
 ## Naming a proxy as a proxy
 

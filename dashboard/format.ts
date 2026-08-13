@@ -122,10 +122,11 @@ export function panel(value: string, children: ViewNode[]): ViewNode {
 /** A Tabs block from a list of panels. `defaultValue` must match a real tab or none open. */
 export function tabsNode(
   tabs: Array<{ value: string; label: string; body: ViewNode[] }>,
+  props: Record<string, unknown> = {},
 ): ViewNode {
   return {
     component: "Tabs",
-    props: { defaultValue: tabs[0]!.value, variant: "underline" },
+    props: { defaultValue: tabs[0]!.value, variant: "underline", ...props },
     children: [
       {
         component: "Tabs.List",
@@ -169,6 +170,23 @@ export function sparkline(
 }
 
 /**
+ * A Heatmap (this repo's own registry addition, not a library component). `values` is
+ * rows × columns; `null` is a missing cell, not zero.
+ */
+export function heatmap(
+  values: Array<Array<number | null>>,
+  rowLabels: string[],
+  colLabels: string[],
+  label: string,
+  props: Record<string, unknown> = {},
+): ViewNode {
+  return {
+    component: "Heatmap",
+    props: { values, rowLabels, colLabels, "aria-label": label, ...props },
+  };
+}
+
+/**
  * What a top-N table left out, or an empty string when it left out nothing.
  *
  * Every `.slice(0, N)` in a document needs one of these. A ranked table drawn from a larger
@@ -180,6 +198,17 @@ export function capNote(shown: number, total: number, unit: string, share?: stri
   return (
     `Showing the top ${n(shown)} of ${countOf(total, unit, unit + "s")}` +
     (share ? `; the ${n(total - shown)} not listed hold ${share}.` : ".")
+  );
+}
+
+/** `capNote` for a table ordered by recency rather than by rank, where "the top 12"
+ *  names the wrong twelve. */
+export function tailNote(shown: number, total: number, unit: string): string {
+  if (total <= shown) return `All ${countOf(total, unit, `${unit}s`)}.`;
+  return (
+    `The most recent ${n(shown)} of ${countOf(total, unit, `${unit}s`)}; ` +
+    // The verb rides the count: "the 1 older month is", "the 5 older months are".
+    `the ${countOf(total - shown, `older ${unit} is`, `older ${unit}s are`)} not listed.`
   );
 }
 

@@ -11,12 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { errorsOf, validateViewSpec, warningsOf } from "@batthewz/response-ui-renderer/spec";
 import type { ComponentNode } from "@batthewz/response-ui-renderer/spec";
-import { defaultRegistry, listComponentNames } from "@batthewz/response-ui-renderer";
-import { buildHistorySpec, collect, fillMonths, trendLine } from "../dashboard/history.ts";
+import { listComponentNames } from "@batthewz/response-ui-renderer";
+import { buildHistorySpec, collect, fillMonths, monthsBetween, trendLine } from "../dashboard/history.ts";
 import { componentNames } from "../dashboard/gate.ts";
-import { capNote, excerpt, share } from "../dashboard/format.ts";
+import { contracts, registry } from "../src/registry.ts";
+import { capNote, excerpt, share, tailNote } from "../dashboard/format.ts";
 
-const knownComponents = new Set(listComponentNames(defaultRegistry));
+// The SHARED registry and contracts, not the library defaults: the gate and the host must
+// agree on them, and `Heatmap` exists only in the shared ones. Validating with them here
+// exercises the same options the gate passes.
+const knownComponents = new Set(listComponentNames(registry));
+const validate = (spec: unknown) => validateViewSpec(spec, { registry, contracts });
 /** The cap `history.ts` puts on a commit subject; excerpt is exercised at that boundary. */
 const SUBJECT_CAP = 96;
 
@@ -61,6 +66,14 @@ console.log("formatting: the helpers every figure on the page passes through");
     capNote(15, 15, "file"), "All 15 files.");
   check("…with the singular right at the boundary", capNote(1, 1, "file"), "All 1 file.");
 
+  // The chronological cut has the same singular boundary — a 13-month repo cuts exactly
+  // one row, and "the 1 older are not listed" shipped once.
+  check("a chronological cut agrees with its own count",
+    tailNote(12, 13, "month"), "The most recent 12 of 13 months; the 1 older month is not listed.");
+  check("…and in the plural", tailNote(12, 17, "month"),
+    "The most recent 12 of 17 months; the 5 older months are not listed.");
+  check("…and an uncut list claims no cut", tailNote(3, 3, "year"), "All 3 years.");
+
   // "the 4 authors not listed hold 0% of the commits" says they hold none.
   check("a tiny share never reads as none", share(4, 24_899), "<0.1%");
   check("…while none still reads as none", share(0, 24_899), "0%");
@@ -68,11 +81,9 @@ console.log("formatting: the helpers every figure on the page passes through");
   check("…an ordinary share keeps its one decimal", share(1755, 24_899), "7%");
 }
 
-console.log("repo history: counted from a repo whose every commit is known");
-// The shell one-liners this replaces are `sort | uniq -c | head -20`, so the only way to
-// know the tallies are right is to build a history by hand and count it by hand.
-{
-  const repo = mkdtempSync(join(tmpdir(), "hist-"));
+/** A real repository built commit by commit — the parsing is the thing under test. */
+function gitRepo(prefix: string) {
+  const repo = mkdtempSync(join(tmpdir(), prefix));
   const run = (args: string[], when?: string) =>
     Bun.spawnSync(["git", ...args], {
       cwd: repo,
@@ -91,6 +102,14 @@ console.log("repo history: counted from a repo whose every commit is known");
     run(["add", ...files]);
     run(["-c", `user.name=${who}`, "-c", `user.email=${who}@x.test`, "commit", "-m", msg], when);
   };
+  return { repo, run, commit };
+}
+
+console.log("repo history: counted from a repo whose every commit is known");
+// The shell one-liners this replaces are `sort | uniq -c | head -20`, so the only way to
+// know the tallies are right is to build a history by hand and count it by hand.
+{
+  const { repo, run, commit } = gitRepo("hist-");
 
   run(["init", "-b", "main"]);
   commit("add a.ts and b.ts", ["a.ts", "b.ts"], "2024-01-15T09:00:00+0000", "Alice");
@@ -103,22 +122,30 @@ console.log("repo history: counted from a repo whose every commit is known");
   run(["-c", "user.name=Bob", "-c", "user.email=bob@x.test", "merge", "--no-ff", "-m",
     "Merge branch 'side'", "side"], "2024-03-08T09:00:00+0000");
 
-  const h = collect(repo, "1970-01-01");
+  const h = collect(repo, "2000-01-01");
   check("total commits include the merge", h.commits, 6);
   check("…and the merge is counted as one", h.merges, 1);
   // `git shortlog -sn --no-merges` — which reads stdin instead of the repo when stdin is
   // not a terminal, and reports nothing at all.
-  check("authors rank by non-merge commits", h.authors,
-    [{ name: "Alice", commits: 3 }, { name: "Bob", commits: 2 }]);
+  check("authors rank by non-merge commits, with their all-history active span", h.authors, [
+    // Their files are the ownership map read the other way, ranked, ties by path.
+    { name: "Alice", commits: 3, firstMonth: "2024-01", lastMonth: "2024-03",
+      files: [{ path: "a.ts", commits: 2 }, { path: "b.ts", commits: 1 }, { path: "d.ts", commits: 1 }] },
+    // Bob's merge is excluded from his count but still moves his last-active month.
+    { name: "Bob", commits: 2, firstMonth: "2024-03", lastMonth: "2024-03",
+      files: [{ path: "b.ts", commits: 1 }, { path: "c.ts", commits: 1 }] },
+  ]);
   check("…and they sum to the non-merge total",
     h.authors.reduce((a, x) => a + x.commits, 0), h.commits - h.merges);
   // A merge introduces no file of its own, so d.ts is touched once, by `side work`.
   // Equal counts sort by path, so the table does not reshuffle when a commit lands.
-  check("churn counts commits per file, merge excluded", h.files,
-    [{ path: "a.ts", commits: 2, fixes: 1 },
-     { path: "b.ts", commits: 2, fixes: 0 },
-     { path: "c.ts", commits: 1, fixes: 1 },
-     { path: "d.ts", commits: 1, fixes: 0 }]);
+  // Owners are counted per file from the same records as churn. b.ts is an ownership
+  // tie (Alice and Bob once each), which breaks by name so the table cannot reshuffle.
+  check("churn counts commits per file with its main author, merge excluded", h.files,
+    [{ path: "a.ts", commits: 2, fixes: 1, owner: "Alice", ownerCommits: 2 },
+     { path: "b.ts", commits: 2, fixes: 0, owner: "Alice", ownerCommits: 1 },
+     { path: "c.ts", commits: 1, fixes: 1, owner: "Bob", ownerCommits: 1 },
+     { path: "d.ts", commits: 1, fixes: 0, owner: "Alice", ownerCommits: 1 }]);
   check("…and file touches sum over every row", h.touches, 6);
   // "hotfix" contains "fix": the grep is a word-fragment match and the page says so.
   check("fix-flagged commits match fix|bug|broken anywhere", h.fixCommits, 2);
@@ -132,18 +159,56 @@ console.log("repo history: counted from a repo whose every commit is known");
   check("…and the series runs to today, so a dead repo shows its silence",
     h.months[h.months.length - 1]?.month, h.nowMonth);
 
+  // Coupling: the only commit touching 2–10 files is "add a.ts and b.ts", so exactly one
+  // pair exists and every single-file commit is disclosed as pairless, not dropped.
+  check("co-change pairs come from multi-file commits only", h.pairs,
+    [{ a: "a.ts", b: "b.ts", together: 1, aCommits: 1, bCommits: 1 }]);
+  check("…and the coupling population accounts for every non-merge commit",
+    h.coupling, { eligible: 1, single: 4, oversize: 0 });
+
+  // Shape: non-merge file counts are [2,1,1,1,1] — median 1, nothing mega, and the
+  // 2-file commit ranks first with its subject joined back on.
+  check("a median commit is counted from non-merge file counts",
+    [h.shape.median, h.shape.mega], [1, 0]);
+  check("…and the largest commit keeps its subject, date and size",
+    [h.shape.largest[0]?.files, h.shape.largest[0]?.subject, h.shape.largest[0]?.date],
+    [2, "add a.ts and b.ts", "2024-01-15"]);
+
+  // Rhythm: every fixture commit is stamped 09:00 UTC, and +0000 makes author-local
+  // equal UTC. 2024-01-15 Mon, 01-20 Sat, 03-05 Tue, 03-06 Wed, 03-07 Thu, 03-08 Fri.
+  check("work rhythm buckets by author-local weekday and hour",
+    h.rhythm.map((row) => row[9]), [1, 1, 1, 1, 1, 1, 0]);
+  check("…and every commit in the window lands in exactly one cell",
+    h.rhythm.flat().reduce((a, b) => a + b, 0), h.commits);
+
+  // Flux: Alice and Bob both first commit in 2024, and the years run to today so the
+  // silence since is visible, exactly like the month series.
+  check("contributor flux counts active and first-time authors per year",
+    h.flux[0], { year: "2024", active: 2, fresh: 2 });
+  check("…runs to the current year", h.flux[h.flux.length - 1]?.year, h.nowMonth.slice(0, 4));
+  check("…and every author is first-time exactly once",
+    h.flux.reduce((a, y) => a + y.fresh, 0), h.authors.length);
+
+  check("months between two YYYY-MM stamps count whole months",
+    [monthsBetween("2024-01", "2024-07"), monthsBetween("2023-11", "2024-01")], [6, 2]);
+
   // Windowing: `--since` must move every count, not only the header.
   const late = collect(repo, "2024-02-01");
   check("a window drops the commits outside it", late.commits, 4);
   check("…and the files only those commits touched",
     late.files.map((f) => f.path).sort(), ["b.ts", "c.ts", "d.ts"]);
-  check("…and its authors", late.authors,
-    [{ name: "Bob", commits: 2 }, { name: "Alice", commits: 1 }]);
+  check("…and its authors, whose spans stay all-history", late.authors, [
+    { name: "Bob", commits: 2, firstMonth: "2024-03", lastMonth: "2024-03",
+      files: [{ path: "b.ts", commits: 1 }, { path: "c.ts", commits: 1 }] },
+    // The window drops Alice's January commits, so only her side-branch file remains.
+    { name: "Alice", commits: 1, firstMonth: "2024-01", lastMonth: "2024-03",
+      files: [{ path: "d.ts", commits: 1 }] },
+  ]);
   check("…while the trajectory stays all-history, as the page says it does",
     late.months[0]?.month, "2024-01");
 
   const spec = buildHistorySpec(h, 20);
-  const issues = validateViewSpec(spec).issues;
+  const issues = validate(spec).issues;
   check("the document validates, warnings included",
     [errorsOf(issues).length, warningsOf(issues).length], [0, 0]);
   check("…and every component name is one the renderer knows",
@@ -151,16 +216,19 @@ console.log("repo history: counted from a repo whose every commit is known");
   // Every table here is a slice of something larger, and a ranked table with no note reads
   // as the whole population. Structural rather than a text count: the disclosure has to sit
   // beside the table it describes, which is the part a passing string search cannot show.
+  // An array holding N tables needs N disclosures, not one — three tables sharing a tab
+  // body could otherwise lose two of their notes without this noticing.
   const undisclosed = (node: unknown, out: string[] = []): string[] => {
     if (Array.isArray(node)) {
       const tables = node.filter(
         (c) => typeof c === "object" && c !== null && (c as ComponentNode).component === "Table");
       if (tables.length > 0) {
         const prose = node
-          .filter((c) => c !== tables[0])
+          .filter((c) => !tables.includes(c))
           .map((c) => JSON.stringify(c))
           .join(" ");
-        if (!/All \d|Showing the top|The most recent/.test(prose)) {
+        const notes = prose.match(/All \d|Showing the top|The most recent/g) ?? [];
+        if (notes.length < tables.length) {
           out.push(JSON.stringify(tables[0]).slice(0, 60));
         }
       }
@@ -171,13 +239,30 @@ console.log("repo history: counted from a repo whose every commit is known");
     return out;
   };
   check("…and every table sits beside a note saying what it left out", undisclosed(spec), []);
-  check("…on all five of them", nodesNamed(spec, "Table").length, 5);
+  // Nine fixed tables, plus one per author sub-tab in the knowledge tracker.
+  check("…on all of them, including one per author", nodesNamed(spec, "Table").length, 11);
+  check("…whose author sub-tabs nest inside the page tabs",
+    nodesNamed(spec, "Tabs").length, 2);
+  // Bob's b.ts row reads 50% of his commits AND 50% of the file — two adjacent cells no
+  // other table produces. (A first draft matched a lone "50%", which the knowledge-risk
+  // table also emits: a check that could not fail.)
+  check("…and the tracker states an author's share of a shared file, both ways",
+    JSON.stringify(spec).includes(
+      '"children":["50%"]},{"component":"Table.Cell","children":["50%"]}'), true);
+  // Two files make one pair; a 2×2 matrix restates the table, so only the rhythm grid
+  // renders a Heatmap here.
+  check("…and a two-file repo gets the rhythm heatmap but no matrix",
+    nodesNamed(spec, "Heatmap").length, 1);
+  // The fixture's authors last committed in 2024, which is stale by the time any suite
+  // runs — so the ghost path is a counter that actually fires: a.ts is Alice's alone.
+  check("…and a solely-owned file with a long-gone author is flagged, date attached",
+    JSON.stringify(spec).includes("at risk · last commit 2024-03"), true);
 
   // An empty window is the shape most likely to divide by zero: no max to scale a bar to,
   // no denominator for a share.
   const empty = collect(repo, "2099-01-01");
   const emptySpec = buildHistorySpec(empty, 20);
-  const emptyIssues = validateViewSpec(emptySpec).issues;
+  const emptyIssues = validate(emptySpec).issues;
   check("an empty window still produces a valid document",
     [errorsOf(emptyIssues).length, warningsOf(emptyIssues).length], [0, 0]);
   check("…and says so rather than showing four zeroes",
@@ -203,6 +288,55 @@ console.log("repo history: counted from a repo whose every commit is known");
   rmSync(repo, { recursive: true, force: true });
 }
 
+console.log("coupling: bulk edits are excluded and say so, confidence is per rarer file");
+{
+  const { repo, run, commit } = gitRepo("couple-");
+  run(["init", "-b", "main"]);
+  const when = "2024-05-06T10:00:00+0000";
+  const bulk = (count: number, prefix: string) =>
+    Array.from({ length: count }, (_, i) => `${prefix}${String(i).padStart(2, "0")}.ts`);
+  commit("triple", ["x.ts", "y.ts", "z.ts"], when, "Carol");
+  commit("pair again", ["x.ts", "y.ts"], "2024-05-07T10:00:00+0000", "Carol");
+  commit("big bulk", bulk(11, "h"), "2024-05-08T10:00:00+0000", "Carol");
+  commit("solo", ["x.ts"], "2024-05-09T10:00:00+0000", "Carol");
+  commit("mega bulk", bulk(31, "g"), "2024-05-10T10:00:00+0000", "Carol");
+
+  const h = collect(repo, "2000-01-01");
+  // The 11- and 31-file commits pair everything with everything, so they are set aside
+  // from coupling — but their files still churn: exclusion is per analysis, not global.
+  check("commits touching more than 10 files leave no pair", h.pairs, [
+    { a: "x.ts", b: "y.ts", together: 2, aCommits: 2, bCommits: 2 },
+    { a: "x.ts", b: "z.ts", together: 1, aCommits: 2, bCommits: 1 },
+    { a: "y.ts", b: "z.ts", together: 1, aCommits: 2, bCommits: 1 },
+  ]);
+  check("…and are disclosed as oversize, beside the single-file count",
+    h.coupling, { eligible: 2, single: 1, oversize: 2 });
+  check("…while their files still count as churn", h.files.length, 45);
+  check("…the 31-file commit is mega, the 11-file one is not",
+    [h.shape.mega, h.shape.largest[0]?.files, h.shape.largest[0]?.subject],
+    [1, 31, "mega bulk"]);
+  check("…and the median stands on all five non-merge commits", h.shape.median, 3);
+
+  // Three files share pairs here, so the co-change matrix renders beside the rhythm grid.
+  const spec = buildHistorySpec(h, 20);
+  const issues = validate(spec).issues;
+  check("a document with both heatmaps validates, warnings included",
+    [errorsOf(issues).length, warningsOf(issues).length], [0, 0]);
+  check("…every component name is one the shared registry knows",
+    [...componentNames(spec)].filter((c) => !knownComponents.has(c)), []);
+  check("…and the matrix joins the rhythm grid", nodesNamed(spec, "Heatmap").length, 2);
+  const matrix = nodesNamed(spec, "Heatmap").find(
+    (node) => (node.props as { verticalColLabels?: boolean }).verticalColLabels === true,
+  );
+  const values = (matrix?.props as { values: Array<Array<number | null>> }).values;
+  check("…whose diagonal is missing cells, not zeroes",
+    values.every((row, i) => row[i] === null), true);
+  check("…and whose cells mirror the pair counts",
+    [values[0]?.[1], values[1]?.[0], values[0]?.[2]], [2, 2, 1]);
+
+  rmSync(repo, { recursive: true, force: true });
+}
+
 console.log("history CLI: the entry point users actually run");
 {
   const repo = mkdtempSync(join(tmpdir(), "histcli-"));
@@ -224,7 +358,7 @@ console.log("history CLI: the entry point users actually run");
   const run = (args: string[]) =>
     Bun.spawnSync(["bun", "run", cli, "--repo", repo, ...args], { cwd: out, env: process.env });
 
-  const bare = run(["--since", "1970-01-01"]);
+  const bare = run(["--since", "2000-01-01"]);
   check("no flags exits 0", bare.exitCode, 0);
   check("…and writes the file the next command opens", readdirSync(out), ["history.blob.json"]);
   check("…0600, because the subjects are verbatim commit messages",
@@ -239,18 +373,20 @@ console.log("history CLI: the entry point users actually run");
   // footnote read "1 commits" until every count goes through `countOf`.
   const fresh = readFileSync(join(out, "history.blob.json"), "utf8");
   check("a repo with one commit is not described in the plural",
-    fresh.match(/\b1 (?:[a-z\/-]+ )*(?:commits|months|files|authors|merges|touches|fixes)\b/g),
+    fresh.match(
+      /\b1 (?:[a-z\/-]+ )*(?:commits|months|years|files|pairs|authors|merges|touches|fixes)\b/g,
+    ),
     null);
 
   rmSync(join(out, "history.blob.json"));
-  const piped = run(["--since", "1970-01-01", "--stdout"]);
+  const piped = run(["--since", "2000-01-01", "--stdout"]);
   check("--stdout puts a parseable document on stdout",
     (JSON.parse(piped.stdout.toString()) as { version: number }).version, 1);
   check("…and writes no file", readdirSync(out), []);
   check("…with the report displaced to stderr, or the pipe carries both",
     piped.stderr.toString().includes("validateViewSpec"), true);
 
-  const named = run(["--since", "1970-01-01", "-o", "x.json"]);
+  const named = run(["--since", "2000-01-01", "-o", "x.json"]);
   check("-o decides the path", [named.exitCode, readdirSync(out)], [0, ["x.json"]]);
   rmSync(join(out, "x.json"));
 

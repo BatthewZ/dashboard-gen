@@ -1,13 +1,15 @@
 # Memory index — dashboard-gen
 
-Turns a repository's own `git log` into a rendered page: churn, defect clusters,
-authorship, trajectory, firefighting. The builder emits ViewSpec JSON and never renders it;
-a small committed host does that.
+Turns a repository's own `git log` into a rendered page: churn, defect clusters, temporal
+coupling, authorship and knowledge risk, contributor flux, work rhythm, commit shape,
+trajectory, firefighting. The builder emits ViewSpec JSON and never renders it; a small
+committed host does that, holding a shared registry that adds one custom component (a
+token-painted heatmap) to the library's.
 
 | Document | Contents |
 |---|---|
-| [git-history-metrics.md](./git-history-metrics.md) | Reading `git log` as evidence: the commands that report nothing when a program rather than a person runs them, which date each figure stands on, why one figure must escape the window every other figure is bounded by, and how to name a keyword match so it is not read as a defect count. |
-| [viewspec-documents.md](./viewspec-documents.md) | Authoring ViewSpec JSON for a renderer this repo never runs: what the build gates do and do not see, the token and utility traps that only appear in a browser, why the only chart component cannot label or be hovered, and the rules that keep derived figures from being wrapped in undeserved prose. |
+| [git-history-metrics.md](./git-history-metrics.md) | Reading `git log` as evidence: the commands that report nothing when a program rather than a person runs them, which date and which clock each figure stands on, keeping the commit boundary when an analysis needs commits as units, bounding a co-change population, why one figure must escape the window every other figure is bounded by, and how to name a keyword match so it is not read as a defect count. |
+| [viewspec-documents.md](./viewspec-documents.md) | Authoring ViewSpec JSON for a renderer this repo never runs: what the build gates do and do not see, the token and utility traps that only appear in a browser, extending the registry as a contract shared by gate and host, the silent-overflow and repeated-chip table traps, why the library's only chart component cannot label or be hovered, and the rules that keep derived figures from being wrapped in undeserved prose. |
 | [verification.md](./verification.md) | How to establish that a change works: evidence that cannot fail, measuring in the unit the constraint is written in, structural rules that survive new inputs, and why fresh reviewers are required at a one-way door. |
 
 ## Orientation

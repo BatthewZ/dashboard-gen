@@ -57,6 +57,35 @@ the host's compiled CSS, and it fails silently if not. The library's own utiliti
 because any host that installs the library compiles them; an arbitrary arbitrary-value class
 is not. Grep a compiled stylesheet rather than guessing.
 
+## Extending the registry is a contract, not a convenience
+
+The renderer accepts a registry beyond the library's and a contracts table beside it, and
+a document naming a custom component renders **only** on a host holding that registry.
+Three rules keep this survivable. One module exports the extended registry and contracts,
+and the gate, the tests and the host all import it — a second copy is how the gate
+approves what the host cannot draw. The validator takes the registry and contracts as
+options, so a host's own component is name-checked and contract-checked the same way the
+library's are. And the component itself must be painted from the theme's own tokens —
+`color-mix` in OKLCH between two token colors gives a sequential scale that follows any
+`themeOverrides` with monotone lightness by construction — with inline styles for anything
+whose utility class is not already in the compiled CSS. Grep the compiled stylesheet for
+every class a custom component wears; the ones that survive here are the library's own.
+
+## Tables hide their overflow, and chips repeat themselves
+
+A wide table inside an overflow wrapper does not break the layout — it silently clips,
+and the rightmost column simply does not exist to a reader who does not know to scroll
+sideways. The columns that die are the verdict columns: badges and status chips pushed
+past the edge by long identifiers. Measure `scrollWidth` against the container in a real
+render before trusting any table with long first-column content, and when it overflows,
+remove a column rather than shrink one: a bar too narrow to compare and a chip wrapped
+mid-word are decoration wearing data's clothes. The same doctrine that bans a status
+label repeating down a column bans a "normal" chip on every row — render the exceptional
+tiers only, and fold the field that would falsify the flag into the flag itself. A tab
+bar overflows sideways too, but there the library's native horizontal scroll is the
+intended affordance and wrapping it reads as broken layout — the owner chose scroll over
+wrap here. The narrow-viewport trade is that trailing tabs sit off-screen until scrolled.
+
 ## A chart component is not the same as a readable chart
 
 The library's only chart is a sparkline, and it takes a bare `number[]`. It paints the

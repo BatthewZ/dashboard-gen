@@ -5,14 +5,16 @@
  *   1. `validateViewSpec` — errors AND warnings. The warning tier is where authoring
  *      mistakes actually surface (enum typos, a Dialog with no literal id, forbidden
  *      props), so passing on `ok` alone throws away most of the tool.
- *   2. Component names against the live registry. `validateViewSpec` does NOT do this —
- *      its React-free entry point has no registry to check against, so a misspelled
- *      "Crad" validates clean and renders an inline warning box at runtime instead.
+ *   2. Component names against the live shared registry — the library's plus this repo's
+ *      own. `validateViewSpec` also receives that registry and the matching contracts as
+ *      options, so it judges names too (with a nearest-name suggestion); the explicit
+ *      check stays because its report line is the CLI's contract.
  */
 import { chmodSync, writeFileSync } from "node:fs";
 import { errorsOf, validateViewSpec, warningsOf } from "@batthewz/response-ui-renderer/spec";
-import { defaultRegistry, listComponentNames } from "@batthewz/response-ui-renderer";
+import { listComponentNames } from "@batthewz/response-ui-renderer";
 import type { ViewSpec } from "@batthewz/response-ui-renderer/spec";
+import { contracts, registry } from "../src/registry.ts";
 import { fail, linesFor, payloadOnStdout, say } from "../src/report.ts";
 
 /**
@@ -69,7 +71,10 @@ export function componentNames(node: unknown, into = new Set<string>()): Set<str
 export function gate(spec: ViewSpec): boolean {
   let ok = true;
 
-  const result = validateViewSpec(spec);
+  // The shared registry and contracts go in as options, so the validator judges names
+  // (with a nearest-name suggestion) and the Heatmap contract the same way it judges the
+  // library's own.
+  const result = validateViewSpec(spec, { registry, contracts });
   const errors = errorsOf(result.issues);
   const warnings = warningsOf(result.issues);
   // Warnings are fatal here, so they report as failures rather than as an aside.
@@ -81,14 +86,14 @@ export function gate(spec: ViewSpec): boolean {
   for (const i of warnings) validation(`  WARN   ${i.path}: ${i.message}`);
   if (!result.ok || errors.length > 0 || warnings.length > 0) ok = false;
 
-  const known = new Set(listComponentNames(defaultRegistry));
+  const known = new Set(listComponentNames(registry));
   const used = [...componentNames(spec)].sort();
   const unknown = used.filter((c) => !known.has(c));
-  const registry = linesFor(unknown.length === 0);
-  registry(
+  const registryLine = linesFor(unknown.length === 0);
+  registryLine(
     `registry          ${used.length} names used, ${known.size} known, ${unknown.length} unresolved`,
   );
-  for (const c of unknown) registry(`  UNKNOWN  ${c}`);
+  for (const c of unknown) registryLine(`  UNKNOWN  ${c}`);
   if (unknown.length > 0) ok = false;
 
   return ok;
