@@ -1,3 +1,21 @@
+# In Short
+
+This project was inspired by blog post [The Git Commands I Run Before Reading Any Code](https://piechowski.io/post/git-commands-before-reading-code/).
+
+It runs essentially runs some git commands on a local repo of your choosing, and injects the output into a [Response UI Renderer](https://batthewz.github.io/response-ui-renderer/?page=playground) ViewSpec
+
+**The git commands are, more or less:**
+
+`git log --format=format: --name-only --since="1 year ago" | sort | uniq -c | sort -nr | head -20`
+
+`git shortlog -sn --no-merges`
+
+`git log -i -E --grep="fix|bug|broken" --name-only --format='' | sort | uniq -c | sort -nr | head -20`
+
+`git log --format='%ad' --date=format:'%Y-%m' | sort | uniq -c`
+
+`git log --oneline --since="1 year ago" | grep -iE 'revert|hotfix|emergency|rollback'`
+
 # dashboard-gen
 
 Every repository is already keeping a detailed record of how it was built. You just can't
@@ -58,27 +76,27 @@ bun run preview history.blob.json
 
 ### If it didn't work
 
-| What you see | Why | Fix |
-|---|---|---|
-| `not a git repository` | `--repo` points outside a repo | Any path *inside* the repository works |
-| `has no commits yet` | Fresh `git init` | Nothing to read until the first commit |
-| `No commit falls since …` on the page | The window is narrower than the repo is quiet | `bun run history --since "5 years ago"` |
-| `error: Failed to start server. Is port 8787 in use?` | A preview is already running | `bun run preview --port 8788` |
-| `no such file: history.blob.json` | You ran `preview` before `history` | Build the document first — the error names the command |
-| A module resolution error naming `@batthewz/…` | No `node_modules` | `bun install` |
-| `dashboard gate FAILED — not writing output` | A real defect in the document | See [When the gate fails](#when-the-gate-fails) |
+| What you see                                          | Why                                           | Fix                                                    |
+| ----------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------ |
+| `not a git repository`                                | `--repo` points outside a repo                | Any path _inside_ the repository works                 |
+| `has no commits yet`                                  | Fresh `git init`                              | Nothing to read until the first commit                 |
+| `No commit falls since …` on the page                 | The window is narrower than the repo is quiet | `bun run history --since "5 years ago"`                |
+| `error: Failed to start server. Is port 8787 in use?` | A preview is already running                  | `bun run preview --port 8788`                          |
+| `no such file: history.blob.json`                     | You ran `preview` before `history`            | Build the document first — the error names the command |
+| A module resolution error naming `@batthewz/…`        | No `node_modules`                             | `bun install`                                          |
+| `dashboard gate FAILED — not writing output`          | A real defect in the document                 | See [When the gate fails](#when-the-gate-fails)        |
 
 ---
 
 ## What the page answers
 
-| Block | Answers |
-|---|---|
-| **Trajectory** | Commits per month for the whole life of the repo, with a direction called from the last six *complete* months |
-| **What changes most** | Files ranked by commits that touched them, each with the share of those commits that were fixes |
-| **Where bugs cluster** | The same files ranked by fix-flagged commits — messages matching `fix`, `bug` or `broken` |
-| **Who built this** | Non-merge commits per author, by the identity `.mailmap` resolves |
-| **Firefighting** | Commits whose subject says revert, hotfix, emergency or rollback, and what share of the window they are |
+| Block                  | Answers                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Trajectory**         | Commits per month for the whole life of the repo, with a direction called from the last six _complete_ months |
+| **What changes most**  | Files ranked by commits that touched them, each with the share of those commits that were fixes               |
+| **Where bugs cluster** | The same files ranked by fix-flagged commits — messages matching `fix`, `bug` or `broken`                     |
+| **Who built this**     | Non-merge commits per author, by the identity `.mailmap` resolves                                             |
+| **Firefighting**       | Commits whose subject says revert, hotfix, emergency or rollback, and what share of the window they are       |
 
 ### Three things that will mislead you if you skim
 
@@ -88,7 +106,7 @@ bun run preview history.blob.json
   signal there is, and a windowed series is exactly where they're missing — so the month
   series is always all-history, and the block says so in its own first line.
 - **Fix-flagged is a word match, not a defect count.** `hotfix` contains `fix`. A file can
-  rank near the top for being *touched by* every fix rather than for causing one, and a
+  rank near the top for being _touched by_ every fix rather than for causing one, and a
   team whose convention is `chore: fix typo` will rank its changelog first. The page prints
   the matching rule and the population beside the number for this reason.
 - **The month in progress is excluded from the trend** and labelled in the table. A partial
@@ -115,13 +133,13 @@ share of the quantity it was ranking.
 bun run history [-o out.json | --stdout] [--repo path] [--since "1 year ago"] [--top N]
 ```
 
-| Flag | Default | Effect |
-|---|---|---|
-| `-o <path>` | `history.blob.json` | Where to write. Refuses a value that is itself a flag |
-| `--stdout` | off | Write the document to stdout instead of a file |
-| `--repo <path>` | current directory | Any path inside the repository |
-| `--since <expr>` | `1 year ago` | Anything `git log --since` accepts. Bounds every block except the trajectory |
-| `--top N` | `20` | Rows per table. Whatever is cut is stated under it |
+| Flag             | Default             | Effect                                                                       |
+| ---------------- | ------------------- | ---------------------------------------------------------------------------- |
+| `-o <path>`      | `history.blob.json` | Where to write. Refuses a value that is itself a flag                        |
+| `--stdout`       | off                 | Write the document to stdout instead of a file                               |
+| `--repo <path>`  | current directory   | Any path inside the repository                                               |
+| `--since <expr>` | `1 year ago`        | Anything `git log --since` accepts. Bounds every block except the trajectory |
+| `--top N`        | `20`                | Rows per table. Whatever is cut is stated under it                           |
 
 Exits `2` on a path that is not a repository, a repository with no commits, or a `--top` it
 cannot rank by. Exits `1` without writing when the gate fails.
@@ -145,7 +163,7 @@ page is typed by hand — layout constants are the only bare numbers in the buil
 a rule rather than a habit: the hand-written first draft of a page like this shipped four
 plausible arithmetic errors.
 
-Deriving a figure isn't enough on its own, either, because prose *around* a derived figure
+Deriving a figure isn't enough on its own, either, because prose _around_ a derived figure
 can still assert something the data contradicts. The trap this page walks closest to is
 putting a windowed count and an all-history total in one sentence, where the reader
 supplies a subset relation that doesn't hold — so the trajectory block names both totals
@@ -155,9 +173,9 @@ and says which is which.
 
 Two checks run on every build, both fatal. A failing gate exits 1 and **writes nothing**.
 
-| Gate | Catches |
-|---|---|
-| `validateViewSpec`, **errors and warnings** | Enum typos, a `Dialog` with no literal `id`, forbidden props, over-deep nesting |
+| Gate                                                     | Catches                                                                                                                                                                    |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validateViewSpec`, **errors and warnings**              | Enum typos, a `Dialog` with no literal `id`, forbidden props, over-deep nesting                                                                                            |
 | Component names vs `listComponentNames(defaultRegistry)` | `validateViewSpec` does not check these — its React-free entry point has no registry — so a misspelled `Crad` validates clean and renders an inline warning box at runtime |
 
 Warnings are fatal on purpose: that tier is where authoring mistakes actually surface, so
@@ -254,11 +272,11 @@ component cannot label or be hovered. Before changing what it counts, read
 [memory/git-history-metrics.md](memory/git-history-metrics.md) — including the git commands
 that report nothing at all when a program rather than a person runs them.
 
-| Path | What it is |
-|---|---|
-| [dashboard/history.ts](dashboard/history.ts) | Reads `git log`, builds the document, and is the CLI |
-| [dashboard/format.ts](dashboard/format.ts) | Formatting and ViewNode helpers every figure passes through |
-| [dashboard/theme.ts](dashboard/theme.ts) | The palette, and the node that makes it visible |
-| [dashboard/gate.ts](dashboard/gate.ts) | The two checks, and the writer that runs after them |
-| [preview/](preview/) | The smallest host that proves a document paints |
-| [src/report.ts](src/report.ts) | Which stream a diagnostic goes to |
+| Path                                         | What it is                                                  |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| [dashboard/history.ts](dashboard/history.ts) | Reads `git log`, builds the document, and is the CLI        |
+| [dashboard/format.ts](dashboard/format.ts)   | Formatting and ViewNode helpers every figure passes through |
+| [dashboard/theme.ts](dashboard/theme.ts)     | The palette, and the node that makes it visible             |
+| [dashboard/gate.ts](dashboard/gate.ts)       | The two checks, and the writer that runs after them         |
+| [preview/](preview/)                         | The smallest host that proves a document paints             |
+| [src/report.ts](src/report.ts)               | Which stream a diagnostic goes to                           |
