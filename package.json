@@ -1,0 +1,22 @@
+{
+  "name": "dashboard-gen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "history": "bun run dashboard/history.ts",
+    "preview": "bun run preview/build.ts",
+    "test": "bun run tests/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@batthewz/response-ui-react-components": "^0.21.0",
+    "@batthewz/response-ui-renderer": "^0.7.0",
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/bun": "latest",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

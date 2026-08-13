@@ -1,0 +1,8 @@
+# A document carries commit subjects verbatim. Generate one, don't commit one.
+*.blob.json
+node_modules/
+
+# The preview host writes its build products beside its four source files.
+preview/app.build.css
+preview/main.js
+preview/spec.json
