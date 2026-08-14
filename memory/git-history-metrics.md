@@ -67,6 +67,23 @@ means nothing pairwise. Exclude both ends, say so on the page with counts, and r
 pair's confidence against the rarer file's own count over that same bounded population —
 mixing in the file's all-commits churn count makes the percentage a lie.
 
+## An author is a string pair, not a person
+
+Git records whatever `user.name`/`user.email` the committing device had, so one
+contributor routinely appears as several identities — the same email under different
+names (several devices) and the same name under different emails (a web UI's noreply
+address). `.mailmap` fixes it per target repo, but a tool analyzing arbitrary repos
+cannot rely on one existing: fold identities that share a non-empty name or a non-empty
+email, transitively and case-insensitively, label the group with its most-used name, and
+let `%aN`/`%aE` apply any mailmap first so an explicit mapping always wins. Two rules
+keep the fold honest: an empty name or email is the absence of an identity and never
+bridges anything, and identities with no shared field stay split even when a human can
+guess they match — "Peter" and "Peter Hume" are only linkable by a mailmap, not by a
+tool. Decide the fold over all history, not the window, so an author's rows cannot merge
+or split as the window moves. And state the rule on the page: folding changes every
+authorship figure, and an undisclosed identity rule reads as a bug when the raw log
+disagrees.
+
 ## Which clock a date is on
 
 `--date=format:` renders `%ad` in the timezone recorded on each commit — the author's own

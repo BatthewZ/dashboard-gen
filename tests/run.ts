@@ -12,7 +12,14 @@ import { join } from "node:path";
 import { errorsOf, validateViewSpec, warningsOf } from "@batthewz/response-ui-renderer/spec";
 import type { ComponentNode } from "@batthewz/response-ui-renderer/spec";
 import { listComponentNames } from "@batthewz/response-ui-renderer";
-import { buildHistorySpec, collect, fillMonths, monthsBetween, trendLine } from "../dashboard/history.ts";
+import {
+  buildHistorySpec,
+  collect,
+  fillMonths,
+  foldIdentities,
+  monthsBetween,
+  trendLine,
+} from "../dashboard/history.ts";
 import { componentNames } from "../dashboard/gate.ts";
 import { contracts, registry } from "../src/registry.ts";
 import { capNote, excerpt, share, tailNote } from "../dashboard/format.ts";
@@ -97,10 +104,14 @@ function gitRepo(prefix: string) {
         GIT_CONFIG_SYSTEM: "/dev/null",
       },
     });
-  const commit = (msg: string, files: string[], when: string, who: string) => {
+  const commit = (msg: string, files: string[], when: string, who: string, email?: string) => {
     for (const f of files) writeFileSync(join(repo, f), `${msg}\n`);
     run(["add", ...files]);
-    run(["-c", `user.name=${who}`, "-c", `user.email=${who}@x.test`, "commit", "-m", msg], when);
+    run(
+      ["-c", `user.name=${who}`, "-c", `user.email=${email ?? `${who}@x.test`}`,
+       "commit", "-m", msg],
+      when,
+    );
   };
   return { repo, run, commit };
 }
@@ -284,6 +295,58 @@ console.log("repo history: counted from a repo whose every commit is known");
   check("months fill through the month asked for, not the last commit",
     fillMonths(new Map([["2024-01", 2], ["2024-03", 4]]), "2024-05").map((m) => m.commits),
     [2, 0, 4, 0, 0]);
+
+  rmSync(repo, { recursive: true, force: true });
+}
+
+console.log("identity: one person on several devices is one author");
+{
+  // Pure-function edges first: folds chain through shared names AND shared emails, the
+  // most-used name wins, and an empty field is the absence of an identity, never a bridge.
+  const chain = foldIdentities([
+    { name: "BatZ", email: "z@x.test" },
+    { name: "Ben M", email: "z@x.test" },
+    { name: "Ben M", email: "noreply@web.test" },
+    { name: "Ben M", email: "noreply@web.test" },
+    { name: "Cara", email: "cara@x.test" },
+  ]);
+  check("identities chain through a shared email and a shared name",
+    [chain.get("BatZ\x1fz@x.test"), chain.get("Ben M\x1fnoreply@web.test")],
+    ["Ben M", "Ben M"]);
+  check("…while an unrelated identity stays itself", chain.get("Cara\x1fcara@x.test"), "Cara");
+  check("…and a name-count tie breaks by name",
+    foldIdentities([
+      { name: "B", email: "same@x.test" },
+      { name: "A", email: "same@x.test" },
+    ]).get("B\x1fsame@x.test"), "A");
+  check("…names fold case-insensitively but keep their most-used casing",
+    foldIdentities([
+      { name: "Peter", email: "p@a.local" },
+      { name: "Peter", email: "p@a.local" },
+      { name: "peter", email: "p@b.local" },
+    ]).get("peter\x1fp@b.local"), "Peter");
+  check("…but empty emails never bridge two names",
+    [...new Set(foldIdentities([
+      { name: "X", email: "" },
+      { name: "Y", email: "" },
+    ]).values())].sort(), ["X", "Y"]);
+
+  // The same fold, end to end through a real repo: three spellings of one person.
+  const { repo, run, commit } = gitRepo("ident-");
+  run(["init", "-b", "main"]);
+  commit("one", ["f1.ts"], "2024-02-05T09:00:00+0000", "BatZ", "z@x.test");
+  commit("two", ["f1.ts"], "2024-02-06T09:00:00+0000", "Ben M", "z@x.test");
+  commit("three", ["f2.ts"], "2024-02-07T09:00:00+0000", "Ben M", "noreply@web.test");
+  commit("four", ["f3.ts"], "2024-02-08T09:00:00+0000", "Cara", "cara@x.test");
+
+  const h = collect(repo, "2000-01-01");
+  check("three recorded identities fold into one author across every figure",
+    h.authors.map((a) => [a.name, a.commits]), [["Ben M", 3], ["Cara", 1]]);
+  check("…file ownership folds with them",
+    h.files.map((f) => [f.path, f.owner, f.ownerCommits]),
+    [["f1.ts", "Ben M", 2], ["f2.ts", "Ben M", 1], ["f3.ts", "Cara", 1]]);
+  check("…and the flux counts people, not spellings",
+    h.flux[0], { year: "2024", active: 2, fresh: 2 });
 
   rmSync(repo, { recursive: true, force: true });
 }

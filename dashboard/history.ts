@@ -194,6 +194,64 @@ export function monthsBetween(a: string, b: string): number {
 /** One windowed non-merge commit from the grouped pass. */
 type GroupedCommit = { hash: string; author: string; files: string[] };
 
+/**
+ * Which recorded identities are one person. Git stores whatever `user.name`/`user.email`
+ * a device had at commit time, so one contributor commonly appears as several strings.
+ * Two identities fold when they share a non-empty name or a non-empty email, transitively
+ * — the two real-world splits are one email under several names (several devices) and one
+ * name under several emails (a web UI's noreply address). `.mailmap` has already applied
+ * upstream via `%aN`/`%aE` and can force any fold this rule cannot see. The most-used
+ * name labels the group, ties broken by name.
+ *
+ * Names and emails match case-insensitively — "Peter" and "peter" are one device away
+ * from each other, not two people — while the label keeps its most-used casing.
+ *
+ * Returns canonical display name per `name\x1f email` pair. Empty names or emails never
+ * fold anything — an empty string is the absence of an identity, not a shared one.
+ */
+export function foldIdentities(
+  seen: Array<{ name: string; email: string }>,
+): Map<string, string> {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    parent.set(x, root);
+    return root;
+  };
+  const node = (id: string): string => {
+    if (!parent.has(id)) parent.set(id, id);
+    return id;
+  };
+  const nameCounts = new Map<string, number>();
+  for (const { name, email } of seen) {
+    if (name.length > 0) bump(nameCounts, name);
+    if (name.length > 0 && email.length > 0) {
+      const a = find(node(`n\x1f${name.toLowerCase()}`));
+      const b = find(node(`e\x1f${email.toLowerCase()}`));
+      if (a !== b) parent.set(a, b);
+    } else if (name.length > 0) {
+      node(`n\x1f${name.toLowerCase()}`);
+    }
+  }
+  const best = new Map<string, { name: string; count: number }>();
+  for (const [name, count] of nameCounts) {
+    const root = find(`n\x1f${name.toLowerCase()}`);
+    const cur = best.get(root);
+    if (!cur || count > cur.count || (count === cur.count && name < cur.name)) {
+      best.set(root, { name, count });
+    }
+  }
+  const out = new Map<string, string>();
+  for (const { name, email } of seen) {
+    const key = `${name}\x1f${email}`;
+    if (!out.has(key) && name.length > 0) {
+      out.set(key, best.get(find(`n\x1f${name.toLowerCase()}`))!.name);
+    }
+  }
+  return out;
+}
+
 export function collect(repoArg: string, since: string): History {
   const now = new Date();
   const nowMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -203,22 +261,36 @@ export function collect(repoArg: string, since: string): History {
   }
   const sinceArg = [`--since=${since}`];
 
+  // All history first, because identity is decided over the whole life of the repo, not
+  // the window: this one pass carries the identity fold, the month series, each author's
+  // first and last month, and who was active in which year — merges included, since a
+  // merge is still a person present.
+  const life = lines(
+    git(path, ["log", "--format=%aN%x1f%aE%x1f%ad", "--date=format:%Y-%m"]),
+  ).map((line) => {
+    const [name = "", email = "", month = ""] = line.split("\x1f");
+    return { name, email, month };
+  });
+  const canonical = foldIdentities(life);
+  const resolve = (name: string, email: string): string =>
+    canonical.get(`${name}\x1f${email}`) ?? name;
+
   // One grouped pass keeps the commit boundary the flat `--name-only` tally discards:
-  // \x1e opens each record, \x1f separates hash from author, files follow. Churn,
-  // authorship, coupling, ownership and commit shape are all counted from these records,
-  // so they are one population by construction.
+  // \x1e opens each record, \x1f separates hash from author identity, files follow.
+  // Churn, authorship, coupling, ownership and commit shape are all counted from these
+  // records, so they are one population by construction.
   const records: GroupedCommit[] = git(path, [
     "log",
     ...sinceArg,
     "--no-merges",
-    "--format=%x1e%H%x1f%aN",
+    "--format=%x1e%H%x1f%aN%x1f%aE",
     "--name-only",
   ])
     .split("\x1e")
     .map((chunk) => {
       const [header = "", ...files] = lines(chunk);
-      const [hash = "", author = ""] = header.split("\x1f");
-      return { hash, author, files };
+      const [hash = "", name = "", email = ""] = header.split("\x1f");
+      return { hash, author: resolve(name, email), files };
     })
     .filter((r) => r.hash.length > 0);
 
@@ -310,15 +382,15 @@ export function collect(repoArg: string, since: string): History {
     git(path, [
       "log",
       ...sinceArg,
-      "--format=%H%x1f%h%x1f%aN%x1f%ad%x1f%s",
+      "--format=%H%x1f%h%x1f%aN%x1f%aE%x1f%ad%x1f%s",
       "--date=format:%Y-%m-%d %u %H",
     ]),
   ).map((line) => {
-    const [hash = "", sha = "", author = "", ad = "", ...rest] = line.split("\x1f");
+    const [hash = "", sha = "", name = "", email = "", ad = "", ...rest] = line.split("\x1f");
     return {
       hash,
       sha,
-      author,
+      author: resolve(name, email),
       date: ad.slice(0, 10),
       weekday: Number(ad.slice(11, 12)),
       hour: Number(ad.slice(13, 15)),
@@ -361,17 +433,9 @@ export function collect(repoArg: string, since: string): History {
       };
     });
 
-  // All history, unlike everything above: the trajectory and the contributor flux are
-  // questions about the shape of the whole life of the repo, and a windowed answer
-  // cannot show a decline. One pass carries the month series, each author's first and
-  // last month, and who was active in which year — merges included, since a merge is
-  // still a person present.
-  const life = lines(git(path, ["log", "--format=%aN%x1f%ad", "--date=format:%Y-%m"])).map(
-    (line) => {
-      const [author = "", month = ""] = line.split("\x1f");
-      return { author, month };
-    },
-  );
+  // Spans, years and the month series come from the all-history pass parsed above —
+  // the trajectory and the contributor flux are questions about the shape of the whole
+  // life of the repo, and a windowed answer cannot show a decline.
   const months = fillMonths(
     tally(life.map((c) => c.month)),
     nowMonth,
@@ -379,9 +443,10 @@ export function collect(repoArg: string, since: string): History {
   const spans = new Map<string, { first: string; last: string }>();
   const activeByYear = new Map<string, Set<string>>();
   for (const c of life) {
-    const s = spans.get(c.author);
+    const who = resolve(c.name, c.email);
+    const s = spans.get(who);
     if (!s) {
-      spans.set(c.author, { first: c.month, last: c.month });
+      spans.set(who, { first: c.month, last: c.month });
     } else {
       if (c.month < s.first) s.first = c.month;
       if (c.month > s.last) s.last = c.month;
@@ -389,7 +454,7 @@ export function collect(repoArg: string, since: string): History {
     const year = c.month.slice(0, 4);
     const active = activeByYear.get(year) ?? new Set<string>();
     activeByYear.set(year, active);
-    active.add(c.author);
+    active.add(who);
   }
   const freshByYear = new Map<string, number>();
   for (const s of spans.values()) bump(freshByYear, s.first.slice(0, 4));
@@ -412,8 +477,8 @@ export function collect(repoArg: string, since: string): History {
   }
   for (const list of filesByAuthor.values()) list.sort(ranked((f) => f.path));
 
-  // `%aN` resolves .mailmap, so one contributor with two addresses is one row — the same
-  // identity `git shortlog -sn` reports.
+  // `%aN`/`%aE` resolve .mailmap first; `foldIdentities` then merges what a mailmap-less
+  // repo leaves split, so one contributor on several devices is one row.
   const authors: Author[] = [...authorTally]
     .map(([name, count]) => {
       const span = spans.get(name);
@@ -673,10 +738,12 @@ function whoTab(h: History, top: number): ViewNode[] {
 
   return [
     muted(
-      `Non-merge commits on ${h.branch}, by the identity .mailmap resolves — merges ` +
-        `(${countOf(h.merges, "commit", "commits")} in this window) are excluded. ` +
-        "First and last are the author's whole life in this repo, merges included, " +
-        "unlike the windowed count beside them.",
+      `Non-merge commits on ${h.branch} — merges (${countOf(h.merges, "commit", "commits")} ` +
+        "in this window) are excluded. Recorded identities sharing a name or an email are " +
+        "folded into one author, labelled by the most-used name; .mailmap, where present, " +
+        "applies first and can force what this rule cannot see. First and last are the " +
+        "author's whole life in this repo, merges included, unlike the windowed count " +
+        "beside them.",
     ),
     table(
       ["Author", "Commits", "", "Share", "First · last commit"],

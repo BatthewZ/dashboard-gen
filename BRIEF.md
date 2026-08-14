@@ -40,6 +40,17 @@ flags). Same grouped-pass records, no new git pass. Hand-counted fixture checks 
 went red). Paths in knowledge tables now yield via `overflow-wrap: anywhere` so verdict
 columns never clip — re-measured 0px overflow on the widest author panel.
 
+**Identity folding (follow-up):** authors were split per recorded `user.name`/`user.email`
+string; `foldIdentities` now merges identities sharing a name or an email (transitive,
+case-insensitive, empty fields never bridge, .mailmap applies first via %aN/%aE, most-used
+name labels the group), decided over all history so windowing cannot re-split a person.
+Applied to every author-keyed figure (authors, ownership, spans, flux, fires). Rule stated
+on the page and in README. Evidence: unit + fixture checks hand-counted (3 spellings → 1
+author; ties by name; case fold keeps casing); sabotage of the email bridge → 6 checks
+red; cadence 3 identities → 1 author; megatix 8 windowed identities → 6 authors, with
+"Peter" vs "Peter Hume" correctly left split (no shared field — only a mailmap can link
+them). Typecheck + full suite green.
+
 ## Evidence
 
 - `bun run typecheck` → `tsc --noEmit`, exit 0, no diagnostics.
